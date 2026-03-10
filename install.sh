@@ -28,10 +28,6 @@ if [ -f "$CONF_FILE" ]; then
     source "$CONF_FILE"
 fi
 
-# ==============================================================================
-# PHASE 1: KONFIGURATION ABFRAGEN (Läuft nur interaktiv auf dem Pi)
-# ==============================================================================
-
 if [ -z "$AUTO_ROLE" ]; then
 
     echo "Welche Rolle soll dieses Gerät übernehmen?"
@@ -62,7 +58,6 @@ if [ -z "$AUTO_ROLE" ]; then
     read -e -p "Dein SSH-Benutzername auf dem Primary Node: " -i "${PRIMARY_SSH_USER:-$ACTUAL_USER}" PRIMARY_SSH_USER
     read -e -p "Dein SSH-Benutzername auf dem Recovery Node: " -i "${RECOVERY_SSH_USER:-ubuntu}" RECOVERY_SSH_USER
 
-    # (E-Mail und Telegram abgekürzt, Code bleibt gleich wie vorher)
     echo ""
     echo "--- Benachrichtigungen ---"
     DEF_EMAIL_CHOICE="n"; [ "$ENABLE_EMAIL" == "true" ] && DEF_EMAIL_CHOICE="y"
@@ -105,6 +100,7 @@ RECOVERY_NODE_MAC="$RECOVERY_NODE_MAC"
 PRIMARY_SSH_USER="$PRIMARY_SSH_USER"
 RECOVERY_SSH_USER="$RECOVERY_SSH_USER"
 
+# ALIAS NAMEN
 PRIMARY_ALIAS="primary"
 RECOVERY_ALIAS="recovery"
 
@@ -126,7 +122,6 @@ EOF
     chmod 600 /etc/remote-survival/survival.conf
 
 else
-    # AUTO-MODUS FÜR DEN BEELINK
     NODE_ROLE="$AUTO_ROLE"
     echo "🤖 Automatischer Modus: Installiere als '$NODE_ROLE'"
     mkdir -p /etc/remote-survival
@@ -143,13 +138,11 @@ chmod +x /usr/local/bin/remote-survival/*.sh
 
 if [ "$NODE_ROLE" == "RECOVERY" ]; then
     echo "🛡️  Setze strikte Ordnerrechte für das Flag-System..."
-    # Dies ist wichtig, damit der normale User (birk) ohne sudo das Flag löschen/erstellen darf!
     chown -R "$RECOVERY_SSH_USER":"$RECOVERY_SSH_USER" /etc/remote-survival
     echo "$RECOVERY_SSH_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart tailscaled" > /etc/sudoers.d/remote-survival-tailscale
     chmod 0440 /etc/sudoers.d/remote-survival-tailscale
 fi
 
-# SYSTEMD-DIENSTE EINRICHTEN
 if [ "$NODE_ROLE" == "PRIMARY" ]; then
     apt-get update -qq && apt-get install -y wakeonlan > /dev/null
     sed -i 's/^#RuntimeWatchdogSec=.*/RuntimeWatchdogSec=60s/' /etc/systemd/system.conf
@@ -172,9 +165,6 @@ fi
 echo "✅ LOKALE INSTALLATION ABGESCHLOSSEN!"
 
 
-# ==============================================================================
-# PHASE 4: REMOTE DEPLOYMENT (User-to-User Brücke!)
-# ==============================================================================
 if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
     echo ""
     echo "================================================="
@@ -184,7 +174,6 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
     
     if [[ "$AUTO_DEPLOY" == "y" || "$AUTO_DEPLOY" == "Y" ]]; then
         
-        # WIR FÜHREN DAS SSH-SETUP ALS NORMALER USER AUS, NICHT ALS ROOT!
         echo "🔑 Schritt 1: Richte System-SSH-Zugriff ($PRIMARY_SSH_USER -> $RECOVERY_SSH_USER) ein..."
         chmod +x check_and_install_ssh.sh
         
@@ -198,8 +187,6 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
             
         echo "✅ SSH-Brücke (HINWEG) steht!"
         
-        # Da dein Recovery-Script auf dem Beelink aktuell nur pingt, ist ein SSH-Rückweg 
-        # technisch gar nicht zwingend erforderlich. Falls du ihn später brauchst:
         echo "🔑 Schritt 2: Baue sicheren Rückweg (Beelink -> Pi) auf..."
         
         sudo -u "$PRIMARY_SSH_USER" ssh -t "$RECOVERY_ALIAS" "
@@ -217,9 +204,8 @@ EOF
             chmod 600 ~/.ssh/config
         "
         
-        BEELINK_PUBKEY=$(sudo -u "$PRIMARY_SSH_USER" ssh "$RECOVERY_ALIAS" "cat ~/.ssh/id_ed25519.pub")
+        BEELINK_PUBKEY=$(sudo -u "$PRIMARY_SSH_USER" ssh "$RECOVERY_ALIAS" "cat ~/.ssh/id_ed25519.pub" | tr -d '\r')
         
-        # Pubkey auf dem Pi eintragen (als normaler User!)
         sudo -u "$PRIMARY_SSH_USER" mkdir -p "/home/$PRIMARY_SSH_USER/.ssh"
         sudo -u "$PRIMARY_SSH_USER" touch "/home/$PRIMARY_SSH_USER/.ssh/authorized_keys"
         if [ -n "$BEELINK_PUBKEY" ] && ! grep -q "$BEELINK_PUBKEY" "/home/$PRIMARY_SSH_USER/.ssh/authorized_keys"; then
