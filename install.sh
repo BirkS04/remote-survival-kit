@@ -14,13 +14,19 @@ if [ ! -x "$(command -v apt)" ]; then
   exit 1
 fi
 
-# Der echte User, der sudo ausgeführt hat (wichtig, falls der Pi Keys anlegt)
 ACTUAL_USER=${SUDO_USER:-$USER}
 
 echo "================================================="
 echo "🚀 WILLKOMMEN BEIM REMOTE SURVIVAL KIT INSTALLER"
 echo "================================================="
 echo ""
+
+# --- ALTE KONFIGURATION LADEN (FALLS VORHANDEN) ---
+CONF_FILE="/etc/remote-survival/survival.conf"
+if [ -f "$CONF_FILE" ]; then
+    echo "📝 Bestehende Konfiguration gefunden! Werte werden voreingetragen (Drücke einfach ENTER zum Übernehmen)."
+    source "$CONF_FILE"
+fi
 
 # ==============================================================================
 # PHASE 1: KONFIGURATION ABFRAGEN (Läuft nur interaktiv auf dem Pi)
@@ -32,7 +38,12 @@ if [ -z "$AUTO_ROLE" ]; then
     echo "Welche Rolle soll dieses Gerät übernehmen?"
     echo "[1] PRIMARY NODE  (z.B. Raspberry Pi - läuft 24/7, überwacht Netzwerk)"
     echo "[2] RECOVERY NODE (z.B. Beelink - wacht über BIOS auf, prüft Primary)"
-    read -p "Bitte wähle [1] oder [2]: " ROLE_CHOICE
+    
+    # Bestimme Default-Rolle für die Anzeige
+    DEF_ROLE="1"
+    if [ "$NODE_ROLE" == "RECOVERY" ]; then DEF_ROLE="2"; fi
+    
+    read -e -p "Bitte wähle [1] oder [2]: " -i "$DEF_ROLE" ROLE_CHOICE
 
     if [ "$ROLE_CHOICE" == "1" ]; then
         NODE_ROLE="PRIMARY"
@@ -46,56 +57,56 @@ if [ -z "$AUTO_ROLE" ]; then
     # --- NETZWERK ABFRAGEN ---
     echo ""
     echo "--- Netzwerkkonfiguration ---"
-    read -p "IP-Adresse des Routers (z.B. 192.168.178.1): " ROUTER_IP
-    read -p "IP-Adresse des Primary Nodes (z.B. Pi): " PRIMARY_NODE_IP
-    read -p "IP-Adresse des Recovery Nodes (z.B. Beelink): " RECOVERY_NODE_IP
+    read -e -p "IP-Adresse des Routers (z.B. 192.168.178.1): " -i "${ROUTER_IP:-192.168.178.1}" ROUTER_IP
+    read -e -p "IP-Adresse des Primary Nodes (z.B. Pi): " -i "${PRIMARY_NODE_IP:-192.168.178.100}" PRIMARY_NODE_IP
+    read -e -p "IP-Adresse des Recovery Nodes (z.B. Beelink): " -i "${RECOVERY_NODE_IP:-192.168.178.101}" RECOVERY_NODE_IP
 
     if [ "$NODE_ROLE" == "PRIMARY" ]; then
-        read -p "MAC-Adresse des Recovery Nodes (für Wake-on-LAN): " RECOVERY_NODE_MAC
+        read -e -p "MAC-Adresse des Recovery Nodes (für Wake-on-LAN): " -i "${RECOVERY_NODE_MAC:-00:11:22:33:44:55}" RECOVERY_NODE_MAC
     else
         RECOVERY_NODE_MAC="NICHT_BENÖTIGT"
     fi
 
-    # --- NEU: SSH BENUTZER ABFRAGEN (Für die bi-direktionale Brücke) ---
+    # --- SSH BENUTZER ABFRAGEN ---
     echo ""
     echo "--- SSH Benutzer (Wichtig für das automatische Failover) ---"
-    read -p "Dein SSH-Benutzername auf dem Primary Node (hier, z.B. $ACTUAL_USER): " PRIMARY_SSH_USER
-    PRIMARY_SSH_USER=${PRIMARY_SSH_USER:-$ACTUAL_USER}
-    read -p "Dein SSH-Benutzername auf dem Recovery Node (z.B. beelink-user): " RECOVERY_SSH_USER
+    read -e -p "Dein SSH-Benutzername auf dem Primary Node: " -i "${PRIMARY_SSH_USER:-$ACTUAL_USER}" PRIMARY_SSH_USER
+    read -e -p "Dein SSH-Benutzername auf dem Recovery Node: " -i "${RECOVERY_SSH_USER:-ubuntu}" RECOVERY_SSH_USER
 
     # --- E-MAIL BENACHRICHTIGUNGEN ---
     echo ""
     echo "--- E-Mail Benachrichtigungen ---"
-    read -p "E-Mail Alarme aktivieren? (y/n): " EMAIL_CHOICE
+    DEF_EMAIL_CHOICE="n"
+    if [ "$ENABLE_EMAIL" == "true" ]; then DEF_EMAIL_CHOICE="y"; fi
+    
+    read -e -p "E-Mail Alarme aktivieren? (y/n): " -i "$DEF_EMAIL_CHOICE" EMAIL_CHOICE
     if [[ "$EMAIL_CHOICE" == "y" || "$EMAIL_CHOICE" == "Y" ]]; then
         ENABLE_EMAIL="true"
         echo "HINWEIS: Nutze smtps:// für Port 465 oder smtp:// für Port 587 (STARTTLS)."
-        read -p "SMTP Server URL (z.B. smtps://smtp.gmail.com:465): " SMTP_URL
-        read -p "SMTP Benutzername (z.B. max@gmail.com): " SMTP_USER
-        read -p "SMTP App-Passwort (kein normales Passwort!): " SMTP_PASS
-        read -p "Absender E-Mail (From): " EMAIL_FROM
-        read -p "Empfänger E-Mail (To): " EMAIL_TO
+        read -e -p "SMTP Server URL: " -i "${SMTP_URL:-smtps://smtp.gmail.com:465}" SMTP_URL
+        read -e -p "SMTP Benutzername: " -i "$SMTP_USER" SMTP_USER
+        read -e -p "SMTP App-Passwort: " -i "$SMTP_PASS" SMTP_PASS
+        read -e -p "Absender E-Mail (From): " -i "${EMAIL_FROM:-$SMTP_USER}" EMAIL_FROM
+        read -e -p "Empfänger E-Mail (To): " -i "${EMAIL_TO:-$SMTP_USER}" EMAIL_TO
     else
         ENABLE_EMAIL="false"
-        SMTP_URL=""
-        SMTP_USER=""
-        SMTP_PASS=""
-        EMAIL_FROM=""
-        EMAIL_TO=""
+        SMTP_URL=""; SMTP_USER=""; SMTP_PASS=""; EMAIL_FROM=""; EMAIL_TO=""
     fi
 
     # --- TELEGRAM BENACHRICHTIGUNGEN ---
     echo ""
     echo "--- Telegram Benachrichtigungen ---"
-    read -p "Telegram Alarme aktivieren? (y/n): " TELEGRAM_CHOICE
+    DEF_TELEGRAM_CHOICE="n"
+    if [ "$ENABLE_TELEGRAM" == "true" ]; then DEF_TELEGRAM_CHOICE="y"; fi
+    
+    read -e -p "Telegram Alarme aktivieren? (y/n): " -i "$DEF_TELEGRAM_CHOICE" TELEGRAM_CHOICE
     if [[ "$TELEGRAM_CHOICE" == "y" || "$TELEGRAM_CHOICE" == "Y" ]]; then
         ENABLE_TELEGRAM="true"
-        read -p "Telegram Bot Token: " TELEGRAM_BOT_TOKEN
-        read -p "Telegram Chat ID: " TELEGRAM_CHAT_ID
+        read -e -p "Telegram Bot Token: " -i "$TELEGRAM_BOT_TOKEN" TELEGRAM_BOT_TOKEN
+        read -e -p "Telegram Chat ID: " -i "$TELEGRAM_CHAT_ID" TELEGRAM_CHAT_ID
     else
         ENABLE_TELEGRAM="false"
-        TELEGRAM_BOT_TOKEN=""
-        TELEGRAM_CHAT_ID=""
+        TELEGRAM_BOT_TOKEN=""; TELEGRAM_CHAT_ID=""
     fi
 
     # --- SYSTEM-ORDNER & CONFIG ---
@@ -114,9 +125,12 @@ PRIMARY_NODE_IP="$PRIMARY_NODE_IP"
 RECOVERY_NODE_IP="$RECOVERY_NODE_IP"
 RECOVERY_NODE_MAC="$RECOVERY_NODE_MAC"
 
-# Neu: SSH User für die Brücke
 PRIMARY_SSH_USER="$PRIMARY_SSH_USER"
 RECOVERY_SSH_USER="$RECOVERY_SSH_USER"
+
+# ALIAS NAMEN (Werden von den Skripten genutzt)
+PRIMARY_ALIAS="pi-primary"
+RECOVERY_ALIAS="beelink-recovery"
 
 ENABLE_TAILSCALE_RESTART="true"
 ENABLE_WATCHDOG="true"
@@ -143,14 +157,9 @@ else
     echo "🤖 Automatischer Modus: Installiere als '$NODE_ROLE'"
     
     mkdir -p /etc/remote-survival
-    # Config vom Pi an den richtigen Ort schieben
     mv /tmp/survival.conf /etc/remote-survival/survival.conf
-    
-    # WICHTIG: Die vom Pi kopierte Config auf RECOVERY umschreiben!
     sed -i 's/^NODE_ROLE=.*/NODE_ROLE="RECOVERY"/' /etc/remote-survival/survival.conf
     chmod 600 /etc/remote-survival/survival.conf
-    
-    # Config laden, damit Variablen wie RECOVERY_SSH_USER bekannt sind
     source /etc/remote-survival/survival.conf
 fi
 
@@ -163,25 +172,19 @@ mkdir -p /usr/local/bin/remote-survival
 cp scripts/*.sh /usr/local/bin/remote-survival/ 2>/dev/null
 chmod +x /usr/local/bin/remote-survival/*.sh
 
-# --- NEU: MINIMAL-SUDO FÜR RECOVERY NODE ---
 if [ "$NODE_ROLE" == "RECOVERY" ]; then
     echo "🛡️  Setze strikte Ordnerrechte für das Flag-System..."
-    # Der Beelink-User darf die Flag-Dateien in diesem Ordner normal erstellen/löschen
     chown -R "$RECOVERY_SSH_USER":"$RECOVERY_SSH_USER" /etc/remote-survival
-    
-    # Der Beelink-User darf OHNE Passwort nur Tailscale neu starten!
     echo "$RECOVERY_SSH_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart tailscaled" > /etc/sudoers.d/remote-survival-tailscale
     chmod 0440 /etc/sudoers.d/remote-survival-tailscale
 fi
 
-
 # ==============================================================================
-# PHASE 3: SYSTEMD DIENSTE (Dein Original Code)
+# PHASE 3: SYSTEMD DIENSTE
 # ==============================================================================
 if [ "$NODE_ROLE" == "PRIMARY" ]; then
     echo "⬇️  Installiere Wake-on-LAN Paket (falls nicht vorhanden)..."
     apt-get update -qq && apt-get install -y wakeonlan > /dev/null
-    
     echo "🛡️  Aktiviere systemd Hardware-Watchdog (60 Sekunden)..."
     sed -i 's/^#RuntimeWatchdogSec=.*/RuntimeWatchdogSec=60s/' /etc/systemd/system.conf
     systemctl daemon-reexec
@@ -202,7 +205,6 @@ elif [ "$NODE_ROLE" == "RECOVERY" ]; then
     echo "🟢 Recovery Monitor aktiviert!"
 fi
 
-echo ""
 echo "✅ LOKALE INSTALLATION ABGESCHLOSSEN!"
 
 
@@ -218,38 +220,43 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
     
     if [[ "$AUTO_DEPLOY" == "y" || "$AUTO_DEPLOY" == "Y" ]]; then
         
-        # 1. SSH BRÜCKE: PI -> BEELINK
+        # 1. SSH BRÜCKE: PI -> BEELINK (Für root, da systemd als root läuft)
         echo "🔑 Schritt 1: Richte System-SSH-Zugriff von Pi auf Beelink ein..."
         chmod +x check_and_install_ssh.sh
         
-        # NEU: Wir legen den Alias fest und übergeben alle Variablen automatisch!
-        RECOVERY_ALIAS="beelink-recovery"
+        # Variablen strikt exportieren, damit sudo sie nicht verschluckt
+        export TARGET_IP="$RECOVERY_NODE_IP"
+        export TARGET_USER="$RECOVERY_SSH_USER"
+        export TARGET_ALIAS="$RECOVERY_ALIAS"
+        export SECURE_CHOICE="n"
+        ./check_and_install_ssh.sh
         
-        # env startet das Skript und gibt ihm die Variablen mit.
-        # SECURE_CHOICE="n" verhindert, dass er bei der Installation blockiert und nachfragt.
-        env TARGET_IP="$RECOVERY_NODE_IP" \
-            TARGET_USER="$RECOVERY_SSH_USER" \
-            TARGET_ALIAS="$RECOVERY_ALIAS" \
-            SECURE_CHOICE="n" \
-            ./check_and_install_ssh.sh
         
-        # 2. SSH BRÜCKE: BEELINK -> PI (Der Rückweg)
+        # 2. SSH BRÜCKE: BEELINK -> PI (Der saubere Rückweg für Systemd/Root)
         echo "🔑 Schritt 2: Baue sicheren Rückweg (Beelink -> Pi) auf..."
         
-        # Befehle Beelink, sich einen Key zu generieren, falls er keinen hat
-        ssh "$RECOVERY_ALIAS" "[ ! -f ~/.ssh/id_ed25519 ] && ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N '' -q"
+        # a) Key auf Beelink als ROOT generieren
+        ssh "$RECOVERY_ALIAS" "sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh && sudo ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N '' -q < /dev/null 2>/dev/null || true"
         
-        # Hole den Public Key vom Beelink
-        BEELINK_PUBKEY=$(ssh "$RECOVERY_ALIAS" "cat ~/.ssh/id_ed25519.pub")
+        # b) Pubkey vom Beelink holen
+        BEELINK_PUBKEY=$(ssh "$RECOVERY_ALIAS" "sudo cat /root/.ssh/id_ed25519.pub")
         
-        # Trage ihn in die Authorized_Keys deines Pi-Users ein
-        PI_AUTH_KEYS="/home/$PRIMARY_SSH_USER/.ssh/authorized_keys"
-        sudo -u "$PRIMARY_SSH_USER" mkdir -p "/home/$PRIMARY_SSH_USER/.ssh"
-        sudo -u "$PRIMARY_SSH_USER" touch "$PI_AUTH_KEYS"
-        
-        if ! grep -q "$BEELINK_PUBKEY" "$PI_AUTH_KEYS"; then
-            echo "$BEELINK_PUBKEY" | sudo -u "$PRIMARY_SSH_USER" tee -a "$PI_AUTH_KEYS" >/dev/null
+        # c) Pubkey auf dem Pi (root) eintragen, da der Beelink sudo-Befehle schickt
+        mkdir -p /root/.ssh
+        touch /root/.ssh/authorized_keys
+        if ! grep -q "$BEELINK_PUBKEY" /root/.ssh/authorized_keys; then
+            echo "$BEELINK_PUBKEY" >> /root/.ssh/authorized_keys
         fi
+        
+        # d) SSH Alias auf dem Beelink anlegen (Verhindert HostKey-Abfragen!)
+        ssh "$RECOVERY_ALIAS" "sudo bash -c 'cat <<EOF > /root/.ssh/config
+Host $PRIMARY_ALIAS
+    HostName $PRIMARY_NODE_IP
+    User root
+    IdentityFile /root/.ssh/id_ed25519
+    StrictHostKeyChecking accept-new
+EOF
+sudo chmod 600 /root/.ssh/config'"
         
         echo "✅ Bi-direktionale SSH-Brücke steht!"
         
@@ -257,16 +264,13 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
         echo "📦 Pushe Repo auf $RECOVERY_ALIAS..."
         ssh "$RECOVERY_ALIAS" "mkdir -p /tmp/remote-survival-setup"
         scp -r ./* "$RECOVERY_ALIAS":/tmp/remote-survival-setup/
-        
-        # Schiebe die Config rüber
         scp /etc/remote-survival/survival.conf "$RECOVERY_ALIAS":/tmp/survival.conf
         
         echo "⚙️  Führe lautlose Installation auf dem Beelink aus..."
-        # Führe Skript als sudo aus und setze AUTO_ROLE
         ssh -t "$RECOVERY_ALIAS" "cd /tmp/remote-survival-setup && sudo env AUTO_ROLE=RECOVERY ./install.sh"
         
         # 4. AUFRÄUMEN
-        ssh "$RECOVERY_ALIAS" "rm -rf /tmp/remote-survival-setup"
+        ssh "$RECOVERY_ALIAS" "rm -rf /tmp/remote-survival-setup /tmp/survival.conf"
         echo "🎉 ZERO-TOUCH DEPLOYMENT ERFOLGREICH ABGESCHLOSSEN!"
     fi
 fi

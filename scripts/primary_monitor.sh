@@ -9,8 +9,8 @@ STRIKE_FILE="/tmp/remote_survival_strikes"
 MAX_STRIKES=3
 RECOVERY_FLAG_FILE="/etc/remote-survival/recovery_active.flag"
 
-# Dynamisches Ziel aus der survival.conf
-RECOVERY_SSH_TARGET="${RECOVERY_SSH_USER}@${RECOVERY_NODE_IP}"
+# Nutze den sauberen SSH Alias (wurde in install.sh in ~/.ssh/config angelegt!)
+RECOVERY_SSH_TARGET="$RECOVERY_ALIAS"
 
 # ==========================================
 # 2. SENSOREN (Nur prüfen, nichts verändern)
@@ -18,7 +18,6 @@ RECOVERY_SSH_TARGET="${RECOVERY_SSH_USER}@${RECOVERY_NODE_IP}"
 
 check_ping() {
     local target_ip="$1"
-    # Sendet 2 Pings, wartet max 2 Sekunden
     if ping -c 2 -W 2 "$target_ip" > /dev/null 2>&1; then
         return 0
     else
@@ -36,27 +35,15 @@ check_daemon_active() {
 }
 
 get_public_ip() {
-    # Holt IPv4 und IPv6 mit 3 Sekunden Timeout (verhindert Hänger)
     local ipv4=$(curl -s -4 --max-time 3 ident.me)
     local ipv6=$(curl -s -6 --max-time 3 ident.me)
-
     local result=""
     
-    if [ -n "$ipv4" ]; then
-        result="IPv4: $ipv4"
-    else
-        result="IPv4: N/A"
-    fi
-
-    if [ -n "$ipv6" ]; then
-        result="$result | IPv6: $ipv6"
-    else
-        result="$result | IPv6: N/A"
-    fi
+    if [ -n "$ipv4" ]; then result="IPv4: $ipv4"; else result="IPv4: N/A"; fi
+    if [ -n "$ipv6" ]; then result="$result | IPv6: $ipv6"; else result="$result | IPv6: N/A"; fi
 
     echo "$result"
 }
-
 
 # ==========================================
 # 3. AKTOREN (Dinge ausführen/verändern)
@@ -93,7 +80,7 @@ system_reboot() {
     /sbin/reboot
 }
 
-# --- NEU: FAILOVER FUNKTIONEN ---
+# --- FAILOVER FUNKTIONEN ---
 trigger_failover() {
     echo "🚨 Triggere Failover zum Beelink..."
     
@@ -105,7 +92,7 @@ trigger_failover() {
     local elapsed=0
     
     while [ "$elapsed" -lt "$timeout" ]; do
-        # BatchMode=yes verhindert Hängenbleiben bei Passwortabfragen. KEIN sudo!
+        # BatchMode=yes verhindert Hängenbleiben bei Passwortabfragen.
         if ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "touch ${RECOVERY_FLAG_FILE}" 2>/dev/null; then
             send_alert "✅ Failover erfolgreich: Beelink ist wach und Flag gesetzt!"
             return 0
@@ -117,10 +104,8 @@ trigger_failover() {
 }
 
 clear_failover_flag() {
-    # Löscht das Flag leise im Hintergrund. KEIN sudo!
     ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "rm -f ${RECOVERY_FLAG_FILE}" 2>/dev/null
 }
-
 
 # ==========================================
 # 4. DAS GEHIRN (Main Loop)
