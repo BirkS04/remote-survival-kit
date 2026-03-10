@@ -162,6 +162,9 @@ fi
 echo "✅ LOKALE INSTALLATION ABGESCHLOSSEN!"
 
 
+# ==============================================================================
+# PHASE 4: REMOTE DEPLOYMENT (User-to-User Brücke!)
+# ==============================================================================
 if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
     echo ""
     echo "================================================="
@@ -174,14 +177,19 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
         echo "🔑 Schritt 1: Richte System-SSH-Zugriff ($PRIMARY_SSH_USER -> $RECOVERY_SSH_USER) ein..."
         chmod +x check_and_install_ssh.sh
         
-        # Wird nativ aufgerufen (ohne sudo -u). Das Skript kümmert sich um das korrekte Userverzeichnis!
         export LOCAL_USER="$PRIMARY_SSH_USER"
         export TARGET_IP="$RECOVERY_NODE_IP"
         export TARGET_USER="$RECOVERY_SSH_USER"
         export TARGET_ALIAS="$RECOVERY_ALIAS"
         export TARGET_PORT="22"
         export SECURE_CHOICE="n"
-        bash ./check_and_install_ssh.sh
+        
+        # WICHTIGER FIX: Breche sofort ab, wenn das Skript fehlschlägt!
+        if ! bash ./check_and_install_ssh.sh; then
+            echo "❌ FEHLER: Die SSH-Brücke konnte nicht aufgebaut werden!"
+            echo "Bitte prüfe, ob die IP $RECOVERY_NODE_IP erreichbar ist und das Passwort stimmt."
+            exit 1
+        fi
             
         echo "✅ SSH-Brücke (HINWEG) steht!"
         
@@ -190,7 +198,6 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
         PI_USER_HOME=$(getent passwd "$PRIMARY_SSH_USER" | cut -d: -f6)
         PI_KEY_FILE="$PI_USER_HOME/.ssh/id_ed25519"
         
-        # Ausführung als root, nutzt aber den Key von deinem User. PTY Problem gelöst!
         ssh -o StrictHostKeyChecking=accept-new -i "$PI_KEY_FILE" "$RECOVERY_SSH_USER@$RECOVERY_NODE_IP" "
             mkdir -p ~/.ssh
             chmod 700 ~/.ssh

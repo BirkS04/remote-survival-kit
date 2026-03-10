@@ -39,12 +39,11 @@ else
     echo "✅ Lokaler SSH-Key existiert bereits."
 fi
 
-# Rechte sofort für den User korrigieren, da root das Skript ausführt
+# Rechte sofort für den User korrigieren
 chown -R "$LOCAL_USER":"$LOCAL_USER" "$SSH_DIR"
 
 echo "🔄 Prüfe passwortloses Login auf $TARGET_IP..."
 
-# HIER WAR DER FEHLER: ConnectTimeout=3 fehlte, wodurch SSH ewig gewartet hat!
 if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -i "$KEY_FILE" -p "$TARGET_PORT" "$TARGET_USER@$TARGET_IP" "echo 'success'" >/dev/null 2>&1; then
     echo "✅ Passwortloses Login funktioniert bereits!"
 else
@@ -54,9 +53,9 @@ else
     echo "Beim Tippen werden KEINE Sternchen angezeigt."
     echo "--------------------------------------------------------"
     
-    # Sicherer direkter Push des Keys statt dem verbuggten ssh-copy-id
+    # FIX: Kein ConnectTimeout mehr! Wir warten so lange, wie der Server (oder du beim Tippen) braucht. -t erzwingt das Terminal.
     PUB_KEY=$(cat "$KEY_FILE.pub")
-    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p "$TARGET_PORT" "$TARGET_USER@$TARGET_IP" \
+    ssh -t -o StrictHostKeyChecking=accept-new -p "$TARGET_PORT" "$TARGET_USER@$TARGET_IP" \
         "mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qF \"$PUB_KEY\" ~/.ssh/authorized_keys || echo \"$PUB_KEY\" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
     
     if [ $? -ne 0 ]; then
