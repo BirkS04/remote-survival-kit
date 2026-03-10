@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Recovery Monitor 5 mins after boot
+
+[Timer]
+# Läuft genau EINMAL, 5 Minuten nachdem der Beelink hochgefahren ist. 
+# (Gibt Tailscale Zeit sich zu verbinden)
+OnBootSec=5min
+
+[Install]
+WantedBy=timers.target

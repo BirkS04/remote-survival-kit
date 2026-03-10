@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Primary Monitor every 5 minutes
+
+[Timer]
+# Starte 2 Minuten nach dem Booten
+OnBootSec=2min
+# Führe danach alle 5 Minuten aus
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

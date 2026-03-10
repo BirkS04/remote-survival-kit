@@ -1,0 +1,7 @@
+[Unit]
+Description=Remote Survival Kit - Primary Monitor
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/remote-survival/primary_monitor.sh
