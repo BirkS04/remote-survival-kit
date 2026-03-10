@@ -21,7 +21,6 @@ echo "🚀 WILLKOMMEN BEIM REMOTE SURVIVAL KIT INSTALLER"
 echo "================================================="
 echo ""
 
-# --- ALTE KONFIGURATION LADEN (FALLS VORHANDEN) ---
 CONF_FILE="/etc/remote-survival/survival.conf"
 if [ -f "$CONF_FILE" ]; then
     echo "📝 Bestehende Konfiguration gefunden! Werte werden voreingetragen (Drücke einfach ENTER zum Übernehmen)."
@@ -38,7 +37,6 @@ if [ -z "$AUTO_ROLE" ]; then
     if [ "$NODE_ROLE" == "RECOVERY" ]; then DEF_ROLE="2"; fi
     
     read -e -p "Bitte wähle [1] oder [2]: " -i "$DEF_ROLE" ROLE_CHOICE
-
     if [ "$ROLE_CHOICE" == "1" ]; then NODE_ROLE="PRIMARY"; else NODE_ROLE="RECOVERY"; fi
 
     echo ""
@@ -100,7 +98,6 @@ RECOVERY_NODE_MAC="$RECOVERY_NODE_MAC"
 PRIMARY_SSH_USER="$PRIMARY_SSH_USER"
 RECOVERY_SSH_USER="$RECOVERY_SSH_USER"
 
-# ALIAS NAMEN
 PRIMARY_ALIAS="primary"
 RECOVERY_ALIAS="recovery"
 
@@ -177,19 +174,24 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
         echo "🔑 Schritt 1: Richte System-SSH-Zugriff ($PRIMARY_SSH_USER -> $RECOVERY_SSH_USER) ein..."
         chmod +x check_and_install_ssh.sh
         
-        sudo -u "$PRIMARY_SSH_USER" env \
-            TARGET_IP="$RECOVERY_NODE_IP" \
-            TARGET_USER="$RECOVERY_SSH_USER" \
-            TARGET_ALIAS="$RECOVERY_ALIAS" \
-            TARGET_PORT="22" \
-            SECURE_CHOICE="n" \
-            bash ./check_and_install_ssh.sh
+        # Wird nativ aufgerufen (ohne sudo -u). Das Skript kümmert sich um das korrekte Userverzeichnis!
+        export LOCAL_USER="$PRIMARY_SSH_USER"
+        export TARGET_IP="$RECOVERY_NODE_IP"
+        export TARGET_USER="$RECOVERY_SSH_USER"
+        export TARGET_ALIAS="$RECOVERY_ALIAS"
+        export TARGET_PORT="22"
+        export SECURE_CHOICE="n"
+        bash ./check_and_install_ssh.sh
             
         echo "✅ SSH-Brücke (HINWEG) steht!"
         
         echo "🔑 Schritt 2: Baue sicheren Rückweg (Beelink -> Pi) auf..."
         
-        sudo -u "$PRIMARY_SSH_USER" ssh -t "$RECOVERY_ALIAS" "
+        PI_USER_HOME=$(getent passwd "$PRIMARY_SSH_USER" | cut -d: -f6)
+        PI_KEY_FILE="$PI_USER_HOME/.ssh/id_ed25519"
+        
+        # Ausführung als root, nutzt aber den Key von deinem User. PTY Problem gelöst!
+        ssh -o StrictHostKeyChecking=accept-new -i "$PI_KEY_FILE" "$RECOVERY_SSH_USER@$RECOVERY_NODE_IP" "
             mkdir -p ~/.ssh
             chmod 700 ~/.ssh
             [ ! -f ~/.ssh/id_ed25519 ] && ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N '' -q
@@ -204,24 +206,26 @@ EOF
             chmod 600 ~/.ssh/config
         "
         
-        BEELINK_PUBKEY=$(sudo -u "$PRIMARY_SSH_USER" ssh "$RECOVERY_ALIAS" "cat ~/.ssh/id_ed25519.pub" | tr -d '\r')
+        BEELINK_PUBKEY=$(ssh -o StrictHostKeyChecking=accept-new -i "$PI_KEY_FILE" "$RECOVERY_SSH_USER@$RECOVERY_NODE_IP" "cat ~/.ssh/id_ed25519.pub" | tr -d '\r')
         
-        sudo -u "$PRIMARY_SSH_USER" mkdir -p "/home/$PRIMARY_SSH_USER/.ssh"
-        sudo -u "$PRIMARY_SSH_USER" touch "/home/$PRIMARY_SSH_USER/.ssh/authorized_keys"
-        if [ -n "$BEELINK_PUBKEY" ] && ! grep -q "$BEELINK_PUBKEY" "/home/$PRIMARY_SSH_USER/.ssh/authorized_keys"; then
-            echo "$BEELINK_PUBKEY" | sudo -u "$PRIMARY_SSH_USER" tee -a "/home/$PRIMARY_SSH_USER/.ssh/authorized_keys" >/dev/null
+        mkdir -p "$PI_USER_HOME/.ssh"
+        touch "$PI_USER_HOME/.ssh/authorized_keys"
+        if [ -n "$BEELINK_PUBKEY" ] && ! grep -q "$BEELINK_PUBKEY" "$PI_USER_HOME/.ssh/authorized_keys"; then
+            echo "$BEELINK_PUBKEY" >> "$PI_USER_HOME/.ssh/authorized_keys"
         fi
+        chown -R "$PRIMARY_SSH_USER:$PRIMARY_SSH_USER" "$PI_USER_HOME/.ssh"
+        chmod 600 "$PI_USER_HOME/.ssh/authorized_keys"
         
         echo "📦 Pushe Repo auf $RECOVERY_ALIAS..."
-        sudo -u "$PRIMARY_SSH_USER" ssh "$RECOVERY_ALIAS" "mkdir -p /tmp/remote-survival-setup"
-        sudo -u "$PRIMARY_SSH_USER" scp -r ./* "$RECOVERY_ALIAS":/tmp/remote-survival-setup/
-        sudo -u "$PRIMARY_SSH_USER" scp /etc/remote-survival/survival.conf "$RECOVERY_ALIAS":/tmp/survival.conf
+        ssh -o StrictHostKeyChecking=accept-new -i "$PI_KEY_FILE" "$RECOVERY_SSH_USER@$RECOVERY_NODE_IP" "mkdir -p /tmp/remote-survival-setup"
+        scp -r -o StrictHostKeyChecking=accept-new -i "$PI_KEY_FILE" ./* "$RECOVERY_SSH_USER@$RECOVERY_NODE_IP":/tmp/remote-survival-setup/
+        scp -o StrictHostKeyChecking=accept-new -i "$PI_KEY_FILE" /etc/remote-survival/survival.conf "$RECOVERY_SSH_USER@$RECOVERY_NODE_IP":/tmp/survival.conf
         
         echo "⚙️  Führe lautlose Installation auf dem Beelink aus..."
         echo "⚠️  Bitte gib jetzt das Sudo-Passwort für '$RECOVERY_SSH_USER' (Beelink) ein, um die Installation dort abzuschließen!"
-        sudo -u "$PRIMARY_SSH_USER" ssh -t "$RECOVERY_ALIAS" "cd /tmp/remote-survival-setup && sudo env AUTO_ROLE=RECOVERY ./install.sh"
+        ssh -t -o StrictHostKeyChecking=accept-new -i "$PI_KEY_FILE" "$RECOVERY_SSH_USER@$RECOVERY_NODE_IP" "cd /tmp/remote-survival-setup && sudo env AUTO_ROLE=RECOVERY ./install.sh"
         
-        sudo -u "$PRIMARY_SSH_USER" ssh "$RECOVERY_ALIAS" "rm -rf /tmp/remote-survival-setup /tmp/survival.conf"
+        ssh -o StrictHostKeyChecking=accept-new -i "$PI_KEY_FILE" "$RECOVERY_SSH_USER@$RECOVERY_NODE_IP" "rm -rf /tmp/remote-survival-setup /tmp/survival.conf"
         echo "🎉 ZERO-TOUCH DEPLOYMENT ERFOLGREICH ABGESCHLOSSEN!"
     fi
 fi
