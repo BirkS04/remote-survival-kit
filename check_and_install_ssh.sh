@@ -86,14 +86,14 @@ if [ -z "$SECURE_CHOICE" ]; then
     read -e -p "Absichern? (y/n): " -i "n" SECURE_CHOICE
 fi
 
-if [[ "$SECURE_CHOICE" == "y" || "$SECURE_CHOICE" == "Y" ]]; then
-    echo "🔒 Sichere Ziel-Server ab..."
-    REMOTE_CMD="sudo sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
-                sudo sed -i 's/^#*PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
-                sudo systemctl restart sshd || sudo systemctl restart ssh"
+# if [[ "$SECURE_CHOICE" == "y" || "$SECURE_CHOICE" == "Y" ]]; then
+#     echo "🔒 Sichere Ziel-Server ab..."
+#     REMOTE_CMD="sudo sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+#                 sudo sed -i 's/^#*PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
+#                 sudo systemctl restart sshd || sudo systemctl restart ssh"
     
-    ssh -t "$TARGET_ALIAS" "$REMOTE_CMD"
-    echo "✅ Ziel-Server ist jetzt abgesichert!"
-fi
+#     ssh -t "$TARGET_ALIAS" "$REMOTE_CMD"
+#     echo "✅ Ziel-Server ist jetzt abgesichert!"
+# fi
 
 echo "🎉 SSH-Setup für $TARGET_ALIAS abgeschlossen."
