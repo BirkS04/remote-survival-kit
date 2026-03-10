@@ -9,11 +9,10 @@ STRIKE_FILE="/tmp/remote_survival_strikes"
 MAX_STRIKES=3
 RECOVERY_FLAG_FILE="/etc/remote-survival/recovery_active.flag"
 
-# Nutze den sauberen SSH Alias (wurde in install.sh in ~/.ssh/config angelegt!)
 RECOVERY_SSH_TARGET="$RECOVERY_ALIAS"
 
 # ==========================================
-# 2. SENSOREN (Nur prüfen, nichts verändern)
+# 2. SENSOREN
 # ==========================================
 
 check_ping() {
@@ -46,7 +45,7 @@ get_public_ip() {
 }
 
 # ==========================================
-# 3. AKTOREN (Dinge ausführen/verändern)
+# 3. AKTOREN
 # ==========================================
 
 restart_service() {
@@ -80,7 +79,7 @@ system_reboot() {
     /sbin/reboot
 }
 
-# --- FAILOVER FUNKTIONEN ---
+# --- FAILOVER FUNKTIONEN (Sicher via User-Brücke!) ---
 trigger_failover() {
     echo "🚨 Triggere Failover zum Beelink..."
     
@@ -92,8 +91,8 @@ trigger_failover() {
     local elapsed=0
     
     while [ "$elapsed" -lt "$timeout" ]; do
-        # BatchMode=yes verhindert Hängenbleiben bei Passwortabfragen.
-        if ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "touch ${RECOVERY_FLAG_FILE}" 2>/dev/null; then
+        # WICHTIG: Befehl wird als normaler User ausgeführt (Sudo -u)
+        if sudo -u "$PRIMARY_SSH_USER" ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "touch ${RECOVERY_FLAG_FILE}" 2>/dev/null; then
             send_alert "✅ Failover erfolgreich: Beelink ist wach und Flag gesetzt!"
             return 0
         fi
@@ -104,7 +103,7 @@ trigger_failover() {
 }
 
 clear_failover_flag() {
-    ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "rm -f ${RECOVERY_FLAG_FILE}" 2>/dev/null
+    sudo -u "$PRIMARY_SSH_USER" ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "rm -f ${RECOVERY_FLAG_FILE}" 2>/dev/null
 }
 
 # ==========================================
@@ -112,18 +111,17 @@ clear_failover_flag() {
 # ==========================================
 
 main() {
-    # --- PHASE 1: Der "Happy Path" ---
+    # Phase 1: Happy Path
     if check_ping "$TAILSCALE_TEST_IP"; then
         manage_strikes "reset"
         clear_failover_flag
         exit 0
     fi
 
-    # --- PHASE 2: Der "Fast-Track" (Tailscale ist gecrasht) ---
+    # Phase 2: Fast-Track (Tailscale neustart)
     if ! check_daemon_active "tailscaled"; then
         restart_service "tailscaled"
         sleep 15
-        
         if check_ping "$TAILSCALE_TEST_IP"; then
             manage_strikes "reset"
             clear_failover_flag
@@ -131,9 +129,8 @@ main() {
         fi
     fi
 
-    # --- PHASE 3: Tiefen-Diagnose ---
+    # Phase 3: Diagnose
     local error_cause=""
-    
     if ! check_ping "$ROUTER_IP"; then
         error_cause="LOKALES_NETZWERK_TOT"
     elif ! check_ping "$INTERNET_TEST_IP"; then
@@ -143,18 +140,16 @@ main() {
         error_cause="TAILSCALE_DEADLOCK"
     fi
 
-    # --- PHASE 4 & 5: Out-of-Band Alarm & Eskalation ---
+    # Phase 4: Eskalation
     local current_strikes=$(manage_strikes "increase")
 
     if [ "$error_cause" == "TAILSCALE_DEADLOCK" ]; then
         local pub_ip=$(get_public_ip)
         send_alert "⚠️ Tailscale blockiert! (Strike: $current_strikes/$MAX_STRIKES). Notfall-IPs -> $pub_ip"
-    
     elif [ "$error_cause" == "LOKALES_NETZWERK_TOT" ]; then
         send_alert "⚠️ Lokales Netzwerk abgerissen! (Strike: $current_strikes/$MAX_STRIKES)"
     fi
 
-    # --- STRIKE-AUSWERTUNG ---
     if [ "$current_strikes" -ge "$MAX_STRIKES" ]; then
         send_alert "🚨 Maximale Strikes erreicht ($MAX_STRIKES). Führe sauberen Hardware-Reboot durch!"
         trigger_failover
@@ -162,7 +157,6 @@ main() {
         system_reboot
     else
         restart_service "tailscaled"
-        
         if [ "$error_cause" == "LOKALES_NETZWERK_TOT" ]; then
             restart_service "NetworkManager"
         fi
