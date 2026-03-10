@@ -221,8 +221,17 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
         # 1. SSH BRÜCKE: PI -> BEELINK
         echo "🔑 Schritt 1: Richte System-SSH-Zugriff von Pi auf Beelink ein..."
         chmod +x check_and_install_ssh.sh
-        ./check_and_install_ssh.sh
-        read -p "Welchen Alias hast du im SSH-Skript gerade vergeben? (z.B. beelink): " RECOVERY_ALIAS
+        
+        # NEU: Wir legen den Alias fest und übergeben alle Variablen automatisch!
+        RECOVERY_ALIAS="beelink-recovery"
+        
+        # env startet das Skript und gibt ihm die Variablen mit.
+        # SECURE_CHOICE="n" verhindert, dass er bei der Installation blockiert und nachfragt.
+        env TARGET_IP="$RECOVERY_NODE_IP" \
+            TARGET_USER="$RECOVERY_SSH_USER" \
+            TARGET_ALIAS="$RECOVERY_ALIAS" \
+            SECURE_CHOICE="n" \
+            ./check_and_install_ssh.sh
         
         # 2. SSH BRÜCKE: BEELINK -> PI (Der Rückweg)
         echo "🔑 Schritt 2: Baue sicheren Rückweg (Beelink -> Pi) auf..."
