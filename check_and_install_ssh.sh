@@ -20,7 +20,7 @@ if [ -z "$TARGET_ALIAS" ]; then echo "❌ Fehler: Kein Alias!"; exit 1; fi
 [ -z "$TARGET_PORT" ] && read -e -p "SSH Port? (Enter für Standard 22): " -i "22" TARGET_PORT
 TARGET_PORT=${TARGET_PORT:-22}
 
-# Finde das korrekte Home-Verzeichnis des normalen Users
+# Finde das korrekte Home-Verzeichnis des normalen Users (nicht root!)
 LOCAL_USER=${LOCAL_USER:-$SUDO_USER}
 LOCAL_USER=${LOCAL_USER:-$USER}
 LOCAL_HOME=$(getent passwd "$LOCAL_USER" | cut -d: -f6)
@@ -39,27 +39,31 @@ else
     echo "✅ Lokaler SSH-Key existiert bereits."
 fi
 
-# Rechte sofort korrigieren
+# Rechte sofort für den User korrigieren, da root das Skript ausführt
 chown -R "$LOCAL_USER":"$LOCAL_USER" "$SSH_DIR"
 
 echo "🔄 Prüfe passwortloses Login auf $TARGET_IP..."
 
-if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$KEY_FILE" -p "$TARGET_PORT" "$TARGET_USER@$TARGET_IP" "echo 'success'" >/dev/null 2>&1; then
+# HIER WAR DER FEHLER: ConnectTimeout=3 fehlte, wodurch SSH ewig gewartet hat!
+if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -i "$KEY_FILE" -p "$TARGET_PORT" "$TARGET_USER@$TARGET_IP" "echo 'success'" >/dev/null 2>&1; then
     echo "✅ Passwortloses Login funktioniert bereits!"
 else
     echo "⚠️  Key muss auf den Ziel-Server kopiert werden."
     echo "--------------------------------------------------------"
-    echo "🛑 ACHTUNG: Bitte warte, bis unten 'password:' steht!"
+    echo "🛑 ACHTUNG: Bitte gib jetzt das SSH-Passwort für '$TARGET_USER' ein!"
     echo "Beim Tippen werden KEINE Sternchen angezeigt."
     echo "--------------------------------------------------------"
     
-    # FIX: Wird als root ausgeführt (Terminal ist intakt!), nutzt aber den Key des Users
-    ssh-copy-id -o StrictHostKeyChecking=accept-new -p "$TARGET_PORT" -f -i "$KEY_FILE.pub" "$TARGET_USER@$TARGET_IP"
+    # Sicherer direkter Push des Keys statt dem verbuggten ssh-copy-id
+    PUB_KEY=$(cat "$KEY_FILE.pub")
+    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p "$TARGET_PORT" "$TARGET_USER@$TARGET_IP" \
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qF \"$PUB_KEY\" ~/.ssh/authorized_keys || echo \"$PUB_KEY\" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
     
     if [ $? -ne 0 ]; then
         echo "❌ Fehler beim Kopieren des Keys. Abbruch."
         exit 1
     fi
+    echo "✅ Key erfolgreich übertragen!"
 fi
 
 # Config anlegen
@@ -79,21 +83,3 @@ EOF
 chown "$LOCAL_USER":"$LOCAL_USER" "$CONFIG_FILE"
 chmod 600 "$CONFIG_FILE"
 echo "✅ Alias angelegt! ('ssh $TARGET_ALIAS')"
-# Server absichern (Optional)
-if [ -z "$SECURE_CHOICE" ]; then
-    echo ""
-    echo "🛡️  Möchtest du den SSH-Server auf dem Ziel ($TARGET_ALIAS) absichern?"
-    read -e -p "Absichern? (y/n): " -i "n" SECURE_CHOICE
-fi
-
-# if [[ "$SECURE_CHOICE" == "y" || "$SECURE_CHOICE" == "Y" ]]; then
-#     echo "🔒 Sichere Ziel-Server ab..."
-#     REMOTE_CMD="sudo sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
-#                 sudo sed -i 's/^#*PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
-#                 sudo systemctl restart sshd || sudo systemctl restart ssh"
-    
-#     ssh -t "$TARGET_ALIAS" "$REMOTE_CMD"
-#     echo "✅ Ziel-Server ist jetzt abgesichert!"
-# fi
-
-echo "🎉 SSH-Setup für $TARGET_ALIAS abgeschlossen."
