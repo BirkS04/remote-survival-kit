@@ -9,20 +9,20 @@ echo "🔑 SSH TRUST & SETUP TOOL"
 echo "=========================================="
 
 # --- 1. PARAMETER PRÜFEN ODER ABFRAGEN ---
-# Wir nutzen read -e -i, um Variablen vorzuschlagen, falls sie vorhanden sind.
-read -e -p "IP des Ziel-Servers? " -i "$TARGET_IP" TARGET_IP
+# Wenn die Variable schon von install.sh gesetzt wurde, wird nicht mehr gefragt!
+[ -z "$TARGET_IP" ] && read -e -p "IP des Ziel-Servers? " TARGET_IP
 if [ -z "$TARGET_IP" ]; then echo "❌ Fehler: Keine IP!"; exit 1; fi
 
-read -e -p "SSH-Benutzername auf dem Ziel? " -i "$TARGET_USER" TARGET_USER
+[ -z "$TARGET_USER" ] && read -e -p "SSH-Benutzername auf dem Ziel? " TARGET_USER
 if [ -z "$TARGET_USER" ]; then echo "❌ Fehler: Kein User!"; exit 1; fi
 
-read -e -p "Gewünschter SSH-Alias? " -i "$TARGET_ALIAS" TARGET_ALIAS
+[ -z "$TARGET_ALIAS" ] && read -e -p "Gewünschter SSH-Alias? " TARGET_ALIAS
 if [ -z "$TARGET_ALIAS" ]; then echo "❌ Fehler: Kein Alias!"; exit 1; fi
 
-read -e -p "SSH Port? (Enter für Standard 22): " -i "${TARGET_PORT:-22}" TARGET_PORT
+[ -z "$TARGET_PORT" ] && read -e -p "SSH Port? (Enter für Standard 22): " -i "22" TARGET_PORT
+TARGET_PORT=${TARGET_PORT:-22}
 
 # --- 2. LOKALEN SSH-KEY PRÜFEN/GENERIEREN ---
-# Wenn mit sudo ausgeführt, ist HOME=/root. Das ist korrekt für Systemd!
 SSH_DIR="$HOME/.ssh"
 KEY_FILE="$SSH_DIR/id_ed25519"
 
@@ -62,7 +62,7 @@ CONFIG_FILE="$SSH_DIR/config"
 touch "$CONFIG_FILE"
 chmod 600 "$CONFIG_FILE"
 
-# Wir löschen den alten Alias-Block falls er existiert, um ihn sauber neu zu schreiben
+# Alten Eintrag löschen falls vorhanden, um Duplikate zu vermeiden
 sed -i "/^Host $TARGET_ALIAS$/,/StrictHostKeyChecking/d" "$CONFIG_FILE" 2>/dev/null
 
 echo "📝 Lege Alias '$TARGET_ALIAS' an..."

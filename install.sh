@@ -39,7 +39,6 @@ if [ -z "$AUTO_ROLE" ]; then
     echo "[1] PRIMARY NODE  (z.B. Raspberry Pi - läuft 24/7, überwacht Netzwerk)"
     echo "[2] RECOVERY NODE (z.B. Beelink - wacht über BIOS auf, prüft Primary)"
     
-    # Bestimme Default-Rolle für die Anzeige
     DEF_ROLE="1"
     if [ "$NODE_ROLE" == "RECOVERY" ]; then DEF_ROLE="2"; fi
     
@@ -220,43 +219,55 @@ if [ "$NODE_ROLE" == "PRIMARY" ] && [ -z "$AUTO_ROLE" ]; then
     
     if [[ "$AUTO_DEPLOY" == "y" || "$AUTO_DEPLOY" == "Y" ]]; then
         
-        # 1. SSH BRÜCKE: PI -> BEELINK (Für root, da systemd als root läuft)
+        # 1. SSH BRÜCKE: PI -> BEELINK
         echo "🔑 Schritt 1: Richte System-SSH-Zugriff von Pi auf Beelink ein..."
         chmod +x check_and_install_ssh.sh
         
-        # Variablen strikt exportieren, damit sudo sie nicht verschluckt
         export TARGET_IP="$RECOVERY_NODE_IP"
         export TARGET_USER="$RECOVERY_SSH_USER"
         export TARGET_ALIAS="$RECOVERY_ALIAS"
+        export TARGET_PORT="22"
         export SECURE_CHOICE="n"
         ./check_and_install_ssh.sh
         
         
         # 2. SSH BRÜCKE: BEELINK -> PI (Der saubere Rückweg für Systemd/Root)
         echo "🔑 Schritt 2: Baue sicheren Rückweg (Beelink -> Pi) auf..."
+        echo "⚠️  ACHTUNG: Bitte gib gleich das Sudo-Passwort für '$RECOVERY_SSH_USER' auf dem Beelink ein!"
         
-        # a) Key auf Beelink als ROOT generieren
-        ssh "$RECOVERY_ALIAS" "sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh && sudo ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N '' -q < /dev/null 2>/dev/null || true"
-        
-        # b) Pubkey vom Beelink holen
-        BEELINK_PUBKEY=$(ssh "$RECOVERY_ALIAS" "sudo cat /root/.ssh/id_ed25519.pub")
-        
-        # c) Pubkey auf dem Pi (root) eintragen, da der Beelink sudo-Befehle schickt
-        mkdir -p /root/.ssh
-        touch /root/.ssh/authorized_keys
-        if ! grep -q "$BEELINK_PUBKEY" /root/.ssh/authorized_keys; then
-            echo "$BEELINK_PUBKEY" >> /root/.ssh/authorized_keys
-        fi
-        
-        # d) SSH Alias auf dem Beelink anlegen (Verhindert HostKey-Abfragen!)
-        ssh "$RECOVERY_ALIAS" "sudo bash -c 'cat <<EOF > /root/.ssh/config
+        # Erzeuge ein Terminal (-t), damit sudo auf dem Beelink dich nach dem Passwort fragen kann.
+        # Der PubKey wird danach temporär in /tmp abgelegt, damit wir ihn ohne sudo auslesen können.
+        ssh -t "$RECOVERY_ALIAS" "sudo bash -c '
+            mkdir -p /root/.ssh
+            chmod 700 /root/.ssh
+            if [ ! -f /root/.ssh/id_ed25519 ]; then
+                ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N \"\" -q
+            fi
+            cp /root/.ssh/id_ed25519.pub /tmp/beelink_root.pub
+            chmod 644 /tmp/beelink_root.pub
+            
+            cat <<EOF > /root/.ssh/config
 Host $PRIMARY_ALIAS
     HostName $PRIMARY_NODE_IP
     User root
     IdentityFile /root/.ssh/id_ed25519
     StrictHostKeyChecking accept-new
 EOF
-sudo chmod 600 /root/.ssh/config'"
+            chmod 600 /root/.ssh/config
+        '"
+        
+        # Pubkey vom Beelink holen (Wir filtern evtl. Störzeichen vom Terminal raus)
+        BEELINK_PUBKEY=$(ssh "$RECOVERY_ALIAS" "cat /tmp/beelink_root.pub" | tr -d '\r')
+        
+        # Pubkey auf dem Pi (root) eintragen
+        mkdir -p /root/.ssh
+        touch /root/.ssh/authorized_keys
+        if [ -n "$BEELINK_PUBKEY" ] && ! grep -q "$BEELINK_PUBKEY" /root/.ssh/authorized_keys; then
+            echo "$BEELINK_PUBKEY" >> /root/.ssh/authorized_keys
+        fi
+        
+        # Temporären Key auf dem Beelink aufräumen
+        ssh -t "$RECOVERY_ALIAS" "rm -f /tmp/beelink_root.pub 2>/dev/null"
         
         echo "✅ Bi-direktionale SSH-Brücke steht!"
         
