@@ -7,6 +7,10 @@ source /etc/remote-survival/survival.conf
 
 STRIKE_FILE="/tmp/remote_survival_strikes"
 MAX_STRIKES=3
+RECOVERY_FLAG_FILE="/etc/remote-survival/recovery_active.flag"
+
+# Dynamisches Ziel aus der survival.conf
+RECOVERY_SSH_TARGET="${RECOVERY_SSH_USER}@${RECOVERY_NODE_IP}"
 
 # ==========================================
 # 2. SENSOREN (Nur prüfen, nichts verändern)
@@ -89,6 +93,34 @@ system_reboot() {
     /sbin/reboot
 }
 
+# --- NEU: FAILOVER FUNKTIONEN ---
+trigger_failover() {
+    echo "🚨 Triggere Failover zum Beelink..."
+    
+    if [ "$RECOVERY_NODE_MAC" != "NICHT_BENÖTIGT" ]; then
+        wakeonlan "$RECOVERY_NODE_MAC" > /dev/null 2>&1
+    fi
+
+    local timeout=45
+    local elapsed=0
+    
+    while [ "$elapsed" -lt "$timeout" ]; do
+        # BatchMode=yes verhindert Hängenbleiben bei Passwortabfragen. KEIN sudo!
+        if ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "touch ${RECOVERY_FLAG_FILE}" 2>/dev/null; then
+            send_alert "✅ Failover erfolgreich: Beelink ist wach und Flag gesetzt!"
+            return 0
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    send_alert "❌ Failover fehlgeschlagen: Beelink nicht per SSH erreichbar."
+}
+
+clear_failover_flag() {
+    # Löscht das Flag leise im Hintergrund. KEIN sudo!
+    ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "rm -f ${RECOVERY_FLAG_FILE}" 2>/dev/null
+}
+
 
 # ==========================================
 # 4. DAS GEHIRN (Main Loop)
@@ -98,6 +130,7 @@ main() {
     # --- PHASE 1: Der "Happy Path" ---
     if check_ping "$TAILSCALE_TEST_IP"; then
         manage_strikes "reset"
+        clear_failover_flag
         exit 0
     fi
 
@@ -108,6 +141,7 @@ main() {
         
         if check_ping "$TAILSCALE_TEST_IP"; then
             manage_strikes "reset"
+            clear_failover_flag
             exit 0
         fi
     fi
@@ -138,6 +172,7 @@ main() {
     # --- STRIKE-AUSWERTUNG ---
     if [ "$current_strikes" -ge "$MAX_STRIKES" ]; then
         send_alert "🚨 Maximale Strikes erreicht ($MAX_STRIKES). Führe sauberen Hardware-Reboot durch!"
+        trigger_failover
         sleep 5
         system_reboot
     else
