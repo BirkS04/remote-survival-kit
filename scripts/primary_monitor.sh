@@ -79,7 +79,7 @@ system_reboot() {
     /sbin/reboot
 }
 
-# --- FAILOVER FUNKTIONEN (Sicher via User-Brücke!) ---
+# --- FAILOVER FUNKTIONEN ---
 trigger_failover() {
     echo "🚨 Triggere Failover zum Beelink..."
     
@@ -91,8 +91,8 @@ trigger_failover() {
     local elapsed=0
     
     while [ "$elapsed" -lt "$timeout" ]; do
-        # WICHTIG: Befehl wird als normaler User ausgeführt (Sudo -u)
-        if sudo -u "$PRIMARY_SSH_USER" ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "touch ${RECOVERY_FLAG_FILE}" 2>/dev/null; then
+        # Root nutzt jetzt seinen eigenen Alias, der auf den Key des Users zeigt!
+        if ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "touch ${RECOVERY_FLAG_FILE}" 2>/dev/null; then
             send_alert "✅ Failover erfolgreich: Beelink ist wach und Flag gesetzt!"
             return 0
         fi
@@ -103,7 +103,7 @@ trigger_failover() {
 }
 
 clear_failover_flag() {
-    sudo -u "$PRIMARY_SSH_USER" ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "rm -f ${RECOVERY_FLAG_FILE}" 2>/dev/null
+    ssh -o BatchMode=yes -o ConnectTimeout=2 "$RECOVERY_SSH_TARGET" "rm -f ${RECOVERY_FLAG_FILE}" 2>/dev/null
 }
 
 # ==========================================
