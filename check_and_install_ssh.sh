@@ -42,7 +42,7 @@ fi
 
 echo "🔄 Prüfe passwortloses Login auf $TARGET_IP..."
 
-# Check ebenfalls als echter User ausführen
+# 1. Test, ob es schon geht (läuft als normaler User, weil wir hier KEIN Terminal brauchen)
 if sudo -u "$LOCAL_USER" ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -i "$KEY_FILE" -p "$TARGET_PORT" "$TARGET_USER@$TARGET_IP" "echo 'success'" >/dev/null 2>&1; then
     echo "✅ Passwortloses Login funktioniert bereits!"
 else
@@ -52,8 +52,13 @@ else
     echo "Beim Tippen werden KEINE Sternchen angezeigt."
     echo "--------------------------------------------------------"
     
-    # FIX: Wir nutzen ssh-copy-id als lokaler User. Kein -t mehr, das das Terminal unter sudo zerstört!
-    sudo -u "$LOCAL_USER" ssh-copy-id -i "$KEY_FILE" -p "$TARGET_PORT" -o StrictHostKeyChecking=accept-new "$TARGET_USER@$TARGET_IP"
+    # 2. DER FIX: Wir lesen den Key ein...
+    PUB_KEY=$(cat "$KEY_FILE.pub")
+    
+    # ... und feuern den Befehl direkt ab, OHNE sudo -u! 
+    # Dadurch bleibt der Zugriff auf /dev/tty (dein Terminal) erhalten und die Passwortabfrage klappt.
+    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p "$TARGET_PORT" "$TARGET_USER@$TARGET_IP" \
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qF \"$PUB_KEY\" ~/.ssh/authorized_keys || echo \"$PUB_KEY\" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
     
     if [ $? -ne 0 ]; then
         echo "❌ Fehler beim Kopieren des Keys. Abbruch."
